@@ -39,42 +39,36 @@ public class DecoyFlareEntityRenderer extends EntityRenderer<DecoyFlareEntity> {
         float age = entity.tickCount + partialTick;
         float scale = 0.9f + (float) Math.sin(age * 0.5f) * 0.1f;
         poseStack.scale(scale, scale, scale);
-        VertexConsumer buffer = bufferSource.getBuffer(
-                RenderType.entityTranslucent(getTextureLocation(entity))
-        );
+        VertexConsumer buffer = bufferSource.getBuffer(RenderType.entityTranslucentEmissive(getTextureLocation(entity)));
         PoseStack.Pose pose = poseStack.last();
         int fullBright = LightTexture.FULL_BRIGHT;
-        float r = 1.0f;
-        float g = 1.0f;
-        float b = 1.0f;
-        float a = 1.0f;
         buffer.vertex(pose.pose(), -0.5f, -0.5f, 0.0f)
-                .color(r, g, b, a)
+                .color(1.0f, 1.0f, 1.0f, 1.0f)
                 .uv(0.0f, 1.0f)
                 .overlayCoords(OverlayTexture.NO_OVERLAY)
                 .uv2(fullBright)
-                .normal(pose.normal(), 0, 0, 1)
-                .endVertex();
-        buffer.vertex(pose.pose(), 0.5f, -0.5f, 0.0f)
-                .color(r, g, b, a)
-                .uv(1.0f, 1.0f)
-                .overlayCoords(OverlayTexture.NO_OVERLAY)
-                .uv2(fullBright)
-                .normal(pose.normal(), 0, 0, 1)
-                .endVertex();
-        buffer.vertex(pose.pose(), 0.5f, 0.5f, 0.0f)
-                .color(r, g, b, a)
-                .uv(1.0f, 0.0f)
-                .overlayCoords(OverlayTexture.NO_OVERLAY)
-                .uv2(fullBright)
-                .normal(pose.normal(), 0, 0, 1)
+                .normal(pose.normal(), 0, 0, -1)
                 .endVertex();
         buffer.vertex(pose.pose(), -0.5f, 0.5f, 0.0f)
-                .color(r, g, b, a)
+                .color(1.0f, 1.0f, 1.0f, 1.0f)
                 .uv(0.0f, 0.0f)
                 .overlayCoords(OverlayTexture.NO_OVERLAY)
                 .uv2(fullBright)
-                .normal(pose.normal(), 0, 0, 1)
+                .normal(pose.normal(), 0, 0, -1)
+                .endVertex();
+        buffer.vertex(pose.pose(), 0.5f, 0.5f, 0.0f)
+                .color(1.0f, 1.0f, 1.0f, 1.0f)
+                .uv(1.0f, 0.0f)
+                .overlayCoords(OverlayTexture.NO_OVERLAY)
+                .uv2(fullBright)
+                .normal(pose.normal(), 0, 0, -1)
+                .endVertex();
+        buffer.vertex(pose.pose(), 0.5f, -0.5f, 0.0f)
+                .color(1.0f, 1.0f, 1.0f, 1.0f)
+                .uv(1.0f, 1.0f)
+                .overlayCoords(OverlayTexture.NO_OVERLAY)
+                .uv2(fullBright)
+                .normal(pose.normal(), 0, 0, -1)
                 .endVertex();
         poseStack.popPose();
     }
