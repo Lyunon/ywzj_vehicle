@@ -1,9 +1,16 @@
 package org.ywzj.vehicle.client.shader;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.particle.Particle;
+import net.minecraft.client.particle.ParticleRenderType;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.culling.Frustum;
@@ -18,6 +25,10 @@ import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.ywzj.vehicle.YwzjVehicle;
+import org.ywzj.vehicle.client.particle.SmokeCloudParticle;
+import org.ywzj.vehicle.mixin.client.ParticleEngineAccessor;
+
+import java.util.Queue;
 
 @Mod.EventBusSubscriber(value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ThermalHandler implements ResourceManagerReloadListener {
@@ -63,6 +74,8 @@ public class ThermalHandler implements ResourceManagerReloadListener {
         }
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_ENTITIES) {
             prepareAndRenderEntities(event.getPoseStack(), event.getPartialTick(), event.getFrustum(), event.getCamera());
+        } else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_PARTICLES) {
+            renderSmokeCloudParticles(event.getPoseStack(), event.getPartialTick(), event.getFrustum(), event.getCamera());
         } else if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_LEVEL) {
             applyPostProcess(event.getPartialTick());
         }
@@ -96,14 +109,11 @@ public class ThermalHandler implements ResourceManagerReloadListener {
         if (mc.level == null || mc.player == null) {
             return;
         }
-
-        if (!ensureChain(mc)) return;
-
-        RenderTarget thermalBuffer = thermalChain.getTempTarget("thermal_buffer");
-        if (thermalBuffer == null) {
+        if (!ensureChain(mc)) {
             return;
         }
 
+        RenderTarget thermalBuffer = thermalChain.getTempTarget("thermal_buffer");
         thermalBuffer.setClearColor(0.0F, 0.0F, 0.0F, 0.0F);
         thermalBuffer.clear(Minecraft.ON_OSX);
 
@@ -118,53 +128,109 @@ public class ThermalHandler implements ResourceManagerReloadListener {
                 seeThroughWalls = true;
             }
         }
+
         thermalBuffer.bindWrite(true);
-
-        Vec3 cameraPos = camera.getPosition();
-
         poseStack.pushPose();
-        MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
-        mc.getEntityRenderDispatcher().setRenderShadow(false);
-        for (Entity entity : mc.level.entitiesForRendering()) {
-            if (entity.distanceToSqr(cameraPos) > THERMAL_RANGE_SQ) {
-                continue;
-            }
-            if (mc.getEntityRenderDispatcher().shouldRender(entity, frustum, cameraPos.x(), cameraPos.y(), cameraPos.z())
-                    || entity.hasIndirectPassenger(mc.player)) {
-                double lerpX = Mth.lerp(partialTick, entity.xo, entity.getX());
-                double lerpY = Mth.lerp(partialTick, entity.yo, entity.getY());
-                double lerpZ = Mth.lerp(partialTick, entity.zo, entity.getZ());
+        {
+            MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
+            mc.getEntityRenderDispatcher().setRenderShadow(false);
+            Vec3 cameraPos = camera.getPosition();
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity.distanceToSqr(cameraPos) > THERMAL_RANGE_SQ) {
+                    continue;
+                }
+                if (mc.getEntityRenderDispatcher().shouldRender(entity, frustum, cameraPos.x(), cameraPos.y(), cameraPos.z())
+                        || entity.hasIndirectPassenger(mc.player)) {
+                    double lerpX = Mth.lerp(partialTick, entity.xo, entity.getX());
+                    double lerpY = Mth.lerp(partialTick, entity.yo, entity.getY());
+                    double lerpZ = Mth.lerp(partialTick, entity.zo, entity.getZ());
 
-                mc.getEntityRenderDispatcher().render(
-                        entity,
-                        lerpX - cameraPos.x,
-                        lerpY - cameraPos.y,
-                        lerpZ - cameraPos.z,
-                        entity.getViewYRot(partialTick),
-                        partialTick,
-                        poseStack,
-                        bufferSource,
-                        15728880
-                );
+                    mc.getEntityRenderDispatcher().render(
+                            entity,
+                            lerpX - cameraPos.x,
+                            lerpY - cameraPos.y,
+                            lerpZ - cameraPos.z,
+                            entity.getViewYRot(partialTick),
+                            partialTick,
+                            poseStack,
+                            bufferSource,
+                            15728880
+                    );
+                }
             }
+            bufferSource.endBatch();
+        }
+        poseStack.popPose();
+        mc.getMainRenderTarget().bindWrite(true);
+    }
+
+    private static void renderSmokeCloudParticles(PoseStack poseStack, float partialTick, Frustum frustum, Camera camera) {
+        Minecraft mc = Minecraft.getInstance();
+        if (thermalChain == null || mc.level == null || mc.player == null) {
+            return;
         }
 
-        bufferSource.endBatch();
-        poseStack.popPose();
+        RenderTarget thermalBuffer = thermalChain.getTempTarget("thermal_buffer");
+        Queue<Particle> particles = ((ParticleEngineAccessor) mc.particleEngine).getParticles().get(ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT);
+        if (particles == null || particles.isEmpty()) {
+            return;
+        }
 
-        mc.getMainRenderTarget().bindWrite(true);
+        RenderTarget previousTarget = Minecraft.useShaderTransparency()
+                ? mc.levelRenderer.getParticlesTarget() : mc.getMainRenderTarget();
+        PoseStack modelViewStack = RenderSystem.getModelViewStack();
+        modelViewStack.pushPose();
+        try {
+            modelViewStack.mulPoseMatrix(poseStack.last().pose());
+            RenderSystem.applyModelViewMatrix();
+            mc.gameRenderer.lightTexture().turnOnLightLayer();
+            RenderSystem.enableDepthTest();
+            RenderSystem.setShader(GameRenderer::getParticleShader);
+            thermalBuffer.bindWrite(true);
+
+            Tesselator tesselator = Tesselator.getInstance();
+            BufferBuilder builder = tesselator.getBuilder();
+            ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT.begin(builder, mc.getTextureManager());
+            RenderSystem.blendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                    GlStateManager.SourceFactor.ONE, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
+            RenderSystem.depthMask(false);
+            Vec3 cameraPos = camera.getPosition();
+            for (Particle particle : particles) {
+                if (!(particle instanceof SmokeCloudParticle) || !particle.isAlive()) {
+                    continue;
+                }
+                if (particle.getBoundingBox().getCenter().distanceToSqr(cameraPos) > THERMAL_RANGE_SQ) {
+                    continue;
+                }
+                if (frustum != null && particle.shouldCull() && !frustum.isVisible(particle.getBoundingBox())) {
+                    continue;
+                }
+                particle.render(builder, camera, partialTick);
+            }
+            ParticleRenderType.PARTICLE_SHEET_TRANSLUCENT.end(tesselator);
+        } finally {
+            modelViewStack.popPose();
+            RenderSystem.applyModelViewMatrix();
+            RenderSystem.depthMask(true);
+            RenderSystem.disableBlend();
+            RenderSystem.defaultBlendFunc();
+            mc.gameRenderer.lightTexture().turnOffLightLayer();
+            if (previousTarget != null) {
+                previousTarget.bindWrite(true);
+            } else {
+                mc.getMainRenderTarget().bindWrite(true);
+            }
+        }
     }
 
     private static void applyPostProcess(float partialTick) {
         if (thermalChain == null) return;
-
         try {
             thermalChain.process(partialTick);
         } catch (Exception e) {
             e.printStackTrace();
             cleanup();
         }
-
         Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
     }
 
