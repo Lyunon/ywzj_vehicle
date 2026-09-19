@@ -1,31 +1,21 @@
-name: Build Mod
-
-on:
-  workflow_dispatch:      # Actions 탭에서 수동 실행 버튼
-  push:
-    branches: [ "**" ]
+name: build
+on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'   # 프로젝트에 맞게
 
-      - name: Setup Gradle (with cache)
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
       - name: Build
-        run: ./gradlew build --no-daemon
-
-      - name: Upload jar
-        uses: actions/upload-artifact@v4
-        with:
-          name: ywzj_vehicle-jar
-          path: build/libs/*.jar
+        run: ./gradlew build
